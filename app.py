@@ -176,18 +176,27 @@ with tab_research:
                 tool_ph = st.empty()
                 resp_ph = st.empty()
                 log = []
-                with st.spinner("Searching databases…"):
-                    api_msgs = [{"role": m["role"], "content": m["content"]}
-                                for m in st.session_state.research_messages]
-                    response = run_research_turn(client, api_msgs,
-                                                 on_tool_call=_tool_log_callback(log, tool_ph))
-                tool_ph.empty()
-                if log:
-                    with st.expander(f"📡 Searched {len(log)} database(s)", expanded=False):
-                        for l in log:
-                            st.markdown(l)
-                resp_ph.markdown(response)
-                st.session_state.research_messages.append({"role": "assistant", "content": response})
+                try:
+                    with st.spinner("Searching databases…"):
+                        api_msgs = [{"role": m["role"], "content": m["content"]}
+                                    for m in st.session_state.research_messages]
+                        response = run_research_turn(client, api_msgs,
+                                                     on_tool_call=_tool_log_callback(log, tool_ph))
+                    tool_ph.empty()
+                    if log:
+                        with st.expander(f"📡 Searched {len(log)} database(s)", expanded=False):
+                            for l in log:
+                                st.markdown(l)
+                    resp_ph.markdown(response)
+                    st.session_state.research_messages.append({"role": "assistant", "content": response})
+                except anthropic.AuthenticationError:
+                    tool_ph.empty()
+                    st.session_state.research_messages.pop()  # remove the user msg we just added
+                    st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key, then update it in the sidebar or in Streamlit Cloud secrets.")
+                except Exception as e:
+                    tool_ph.empty()
+                    st.session_state.research_messages.pop()
+                    st.error(f"❌ Unexpected error: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -271,9 +280,18 @@ with tab_litreview:
                         f'<div class="phase-badge">📍 {p.phase}: {p.message}</div>',
                         unsafe_allow_html=True)
 
-                with st.spinner("Planning and searching databases…"):
-                    plan, all_papers, papers = plan_and_search(
-                        client, research_question, papers_per_db, _lr_prog)
+                try:
+                    with st.spinner("Planning and searching databases…"):
+                        plan, all_papers, papers = plan_and_search(
+                            client, research_question, papers_per_db, _lr_prog)
+                except anthropic.AuthenticationError:
+                    prog_ph.empty()
+                    st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key, then update it in the sidebar or in Streamlit Cloud secrets.")
+                    st.stop()
+                except Exception as e:
+                    prog_ph.empty()
+                    st.error(f"❌ Unexpected error during search: {e}")
+                    st.stop()
 
                 prog_ph.empty()
                 lr.update({
@@ -364,12 +382,23 @@ with tab_litreview:
                             f'<div class="phase-badge">📍 {p.phase}: {p.message}</div>',
                             unsafe_allow_html=True)
 
-                    with st.spinner("Writing literature review…"):
-                        review = synthesize_review(
-                            client, lr["question"], selected_papers,
-                            lr["plan"], lr["n_raw"], lr["n_deduped"],
-                            lr["citation_style"], _sp,
-                        )
+                    try:
+                        with st.spinner("Writing literature review…"):
+                            review = synthesize_review(
+                                client, lr["question"], selected_papers,
+                                lr["plan"], lr["n_raw"], lr["n_deduped"],
+                                lr["citation_style"], _sp,
+                            )
+                    except anthropic.AuthenticationError:
+                        prog_ph2.empty()
+                        bar.empty()
+                        st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key, then update it in the sidebar or in Streamlit Cloud secrets.")
+                        st.stop()
+                    except Exception as e:
+                        prog_ph2.empty()
+                        bar.empty()
+                        st.error(f"❌ Unexpected error during synthesis: {e}")
+                        st.stop()
                     prog_ph2.empty()
                     bar.progress(1.0)
 
@@ -401,8 +430,15 @@ with tab_litreview:
                     if not client:
                         st.error("Please enter your Anthropic API key.")
                         st.stop()
-                    with st.spinner("AI screening papers…"):
-                        selected_papers = ai_screen_papers(client, lr["question"], lr["papers"])
+                    try:
+                        with st.spinner("AI screening papers…"):
+                            selected_papers = ai_screen_papers(client, lr["question"], lr["papers"])
+                    except anthropic.AuthenticationError:
+                        st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key, then update it in the sidebar or in Streamlit Cloud secrets.")
+                        st.stop()
+                    except Exception as e:
+                        st.error(f"❌ Unexpected error during screening: {e}")
+                        st.stop()
                     _run_synthesis(client, selected_papers)
 
     # ── STEP 3: Review output ─────────────────────────────────────────────────
@@ -491,8 +527,15 @@ with tab_litreview:
                 if not client:
                     st.error("Please enter your Anthropic API key.")
                     st.stop()
-                with st.spinner("Generating hypotheses and experimental designs…"):
-                    hyp = generate_hypotheses(client, lr["review"], lr["question"])
+                try:
+                    with st.spinner("Generating hypotheses and experimental designs…"):
+                        hyp = generate_hypotheses(client, lr["review"], lr["question"])
+                except anthropic.AuthenticationError:
+                    st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key, then update it in the sidebar or in Streamlit Cloud secrets.")
+                    st.stop()
+                except Exception as e:
+                    st.error(f"❌ Unexpected error generating hypotheses: {e}")
+                    st.stop()
                 lr["hypotheses"] = hyp
                 st.rerun()
 
@@ -543,11 +586,20 @@ with tab_contradiction:
                     st.stop()
                 tool_ph = st.empty()
                 log = []
-                with st.spinner("Searching for supporting and contradicting evidence…"):
-                    result = detect_contradictions(
-                        client, claim,
-                        on_tool_call=_tool_log_callback(log, tool_ph),
-                    )
+                try:
+                    with st.spinner("Searching for supporting and contradicting evidence…"):
+                        result = detect_contradictions(
+                            client, claim,
+                            on_tool_call=_tool_log_callback(log, tool_ph),
+                        )
+                except anthropic.AuthenticationError:
+                    tool_ph.empty()
+                    st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key, then update it in the sidebar or in Streamlit Cloud secrets.")
+                    st.stop()
+                except Exception as e:
+                    tool_ph.empty()
+                    st.error(f"❌ Unexpected error: {e}")
+                    st.stop()
                 tool_ph.empty()
                 st.session_state["cd_result"] = result
                 st.session_state["cd_claim_used"] = claim
@@ -620,11 +672,20 @@ Works best with a full abstract (150-300 words).
                     st.stop()
                 tool_ph3 = st.empty()
                 log3 = []
-                with st.spinner("Searching for related work and building positioning report…"):
-                    result = position_paper(
-                        client, abstract,
-                        on_tool_call=_tool_log_callback(log3, tool_ph3),
-                    )
+                try:
+                    with st.spinner("Searching for related work and building positioning report…"):
+                        result = position_paper(
+                            client, abstract,
+                            on_tool_call=_tool_log_callback(log3, tool_ph3),
+                        )
+                except anthropic.AuthenticationError:
+                    tool_ph3.empty()
+                    st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key, then update it in the sidebar or in Streamlit Cloud secrets.")
+                    st.stop()
+                except Exception as e:
+                    tool_ph3.empty()
+                    st.error(f"❌ Unexpected error: {e}")
+                    st.stop()
                 tool_ph3.empty()
                 if log3:
                     with st.expander(f"📡 Searched {len(log3)} database(s)", expanded=False):
