@@ -71,15 +71,19 @@ def plan_and_search(
             "role": "user",
             "content": f"""You are planning a systematic literature review on: "{research_question}"
 
-CRITICAL: Every search query MUST stay true to the exact scope the user asked for.
-If the topic is broad (e.g. "AI in neuroscience"), keep queries varied across sub-areas.
-If specific (e.g. "astrocytes in synaptic pruning"), stay tightly focused.
-
-Generate a JSON object with:
-1. "pico": object with keys population, intervention, comparison, outcome (omit irrelevant ones)
-2. "search_queries": list of 4 varied search query strings covering the FULL BREADTH of the topic
-3. "inclusion_criteria": list of 3-5 strings
-4. "exclusion_criteria": list of 2-4 strings
+Generate a JSON object with these keys:
+1. "core_terms": list of 2-4 strings — the essential concepts that EVERY result must be about
+   (e.g. for "gut microbiome and epilepsy" → ["gut microbiome", "epilepsy"])
+2. "search_queries": list of 4 PubMed-style boolean query strings.
+   RULES for every query:
+   - MUST contain ALL core_terms connected with AND (never search one concept alone)
+   - Use synonyms/variants within each term group joined with OR, wrapped in parentheses
+   - Example for "gut microbiome and epilepsy":
+     "(gut microbiome OR intestinal microbiota OR gut bacteria) AND (epilepsy OR seizure OR epileptogenesis)"
+   - Vary queries by using different synonym sets, not by dropping core concepts
+3. "pico": object with keys population, intervention, comparison, outcome (omit irrelevant)
+4. "inclusion_criteria": list of 3-5 strings
+5. "exclusion_criteria": list of 2-4 strings
 
 Respond with ONLY valid JSON, no markdown fences."""
         }],
@@ -89,7 +93,7 @@ Respond with ONLY valid JSON, no markdown fences."""
         plan = json.loads(plan_response.content[0].text)
     except Exception:
         plan = {
-            "pico": {},
+            "core_terms": research_question.lower().split(" and "),
             "search_queries": [research_question],
             "inclusion_criteria": ["Peer-reviewed studies", "Neuroscience-related"],
             "exclusion_criteria": ["Non-English", "Conference abstracts only"],
@@ -102,9 +106,63 @@ Respond with ONLY valid JSON, no markdown fences."""
         batch = asyncio.run(_run_all_searches(q, max_per_db))
         all_papers.extend(batch)
 
-    papers = _deduplicate(all_papers)
-    _progress("Searched", f"Found {len(papers)} unique papers.", len(papers))
-    return plan, all_papers, papers
+    # Post-filter: drop papers where title+abstract don't mention every core concept.
+    # We build synonym groups from the generated search queries (which contain OR-ed
+    # synonyms per concept) so that e.g. "seizure" satisfies the "epilepsy" group.
+    import re as _re
+
+    def _synonym_groups_from_queries(queries: list) -> list[list[str]]:
+        """
+        Parse the first query's AND-connected groups into synonym word lists.
+        "(gut microbiome OR intestinal bacteria) AND (epilepsy OR seizure)"
+        → [["gut", "microbiome", "intestinal", "bacteria"], ["epilepsy", "seizure"]]
+        """
+        if not queries:
+            return []
+        first = queries[0].lower()
+        # Split on AND (outside parentheses is fine for heuristic matching)
+        and_parts = _re.split(r'\band\b', first)
+        groups = []
+        for part in and_parts:
+            # Extract words ≥ 3 chars, ignore boolean operators
+            words = [w for w in _re.findall(r'[a-z]{3,}', part)
+                     if w not in ("and", "not", "the", "for", "with", "that")]
+            if words:
+                groups.append(words)
+        return groups
+
+    synonym_groups = _synonym_groups_from_queries(plan.get("search_queries", []))
+
+    # Fall back to splitting the question if query parsing gave nothing
+    if not synonym_groups:
+        parts = [t.strip() for t in _re.split(r'\band\b|\bor\b', research_question.lower()) if t.strip()]
+        synonym_groups = [[w for w in p.split() if len(w) >= 3] for p in parts]
+        synonym_groups = [g for g in synonym_groups if g]
+
+    def _is_relevant(paper: dict) -> bool:
+        if not synonym_groups:
+            return True
+        haystack = (
+            (paper.get("title") or "") + " " + (paper.get("abstract") or "")
+        ).lower()
+        # Every concept group must have at least one word present (OR within group)
+        for group in synonym_groups:
+            # Also match via 6-char stem so "epilep" matches "epileptogenesis"
+            if not any(
+                w in haystack or any(w[:6] in hw for hw in haystack.split())
+                for w in group
+            ):
+                return False
+        return True
+
+    all_papers_filtered = [p for p in all_papers if _is_relevant(p)]
+    papers = _deduplicate(all_papers_filtered)
+    n_filtered = len(all_papers) - len(all_papers_filtered)
+    msg = f"Found {len(papers)} relevant papers"
+    if n_filtered:
+        msg += f" ({n_filtered} off-topic results removed)"
+    _progress("Searched", msg, len(papers))
+    return plan, all_papers_filtered, papers
 
 
 def ai_screen_papers(
