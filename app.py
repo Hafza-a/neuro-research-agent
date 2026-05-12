@@ -11,42 +11,105 @@ from agent.literature_agent import (
 from agent.contradiction_agent import detect_contradictions
 from agent.multi_lit_review.orchestrator import (
     run_multi_agent_review, AgentEvent,
-    PHASE_DRAFT, PHASE_REVISION, PHASE_FINAL, PHASE_FEEDBACK,
-    PHASE_STATUS, PHASE_TOOL,
+    PHASE_BRIEFING, PHASE_DRAFT, PHASE_REVISION, PHASE_FINAL,
+    PHASE_FEEDBACK, PHASE_STATUS, PHASE_TOOL,
 )
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="NeuroResearch Agent",
-    page_icon="🧠",
+    page_title="NeuroResearch",
+    page_icon="N",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── CSS ────────────────────────────────────────────────────────────────────────
-st.markdown("""
+# ── Design system ──────────────────────────────────────────────────────────────
+# Colours that work on the dark (#0D1117) base
+_C = {
+    "scout":    "#38BDF8",   # sky blue
+    "writer":   "#4ADE80",   # green
+    "adversary":"#F87171",   # coral red
+    "indigo":   "#6366F1",   # primary accent
+    "muted":    "#8B949E",   # muted text
+    "border":   "rgba(240,246,252,0.1)",
+    "card":     "rgba(240,246,252,0.04)",
+    "success":  "#238636",
+}
+
+st.markdown(f"""
 <style>
-    .main-header { font-size:2.1rem; font-weight:700; color:#1a1a2e; margin-bottom:.1rem; }
-    .sub-header  { font-size:.95rem; color:#555; margin-bottom:1.2rem; }
-    .phase-badge { background:#f0f7ff; padding:8px 16px; border-radius:20px;
-                   font-size:.9rem; color:#1a73e8; font-weight:500; display:inline-block; }
-    .agent-badge-student  { background:#e8f5e9; padding:5px 12px; border-radius:14px;
-                            color:#1b7c3d; font-weight:600; font-size:.85rem; }
-    .agent-badge-supervisor { background:#fff3e0; padding:5px 12px; border-radius:14px;
-                              color:#e65100; font-weight:600; font-size:.85rem; }
-    .agent-badge-peer     { background:#e3f2fd; padding:5px 12px; border-radius:14px;
-                            color:#1565c0; font-weight:600; font-size:.85rem; }
-    .agent-badge-reviewer { background:#fce4ec; padding:5px 12px; border-radius:14px;
-                            color:#880e4f; font-weight:600; font-size:.85rem; }
-    .step-label  { font-size:.8rem; font-weight:700; color:#6b7280;
-                   text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
-    .step-active { border-left:3px solid #1a73e8; padding-left:10px; }
-    .step-done   { border-left:3px solid #1b7c3d; padding-left:10px; color:#888; }
+  /* ── Typography ── */
+  .nr-title {{
+    font-size: 1.75rem; font-weight: 700; letter-spacing: -0.03em;
+    color: #E6EDF3; margin-bottom: 0.15rem;
+  }}
+  .nr-sub {{
+    font-size: 0.85rem; color: {_C['muted']}; margin-bottom: 1.4rem;
+    letter-spacing: 0.01em;
+  }}
+
+  /* ── Step bar ── */
+  .step-row {{ display: flex; gap: 10px; margin-bottom: 1.4rem; }}
+  .step-cell {{
+    flex: 1; padding: 10px 14px; border-radius: 8px;
+    background: {_C['card']}; border: 1px solid {_C['border']};
+  }}
+  .step-cell.active  {{ border-color: {_C['indigo']}; background: rgba(99,102,241,0.10); }}
+  .step-cell.done    {{ border-color: {_C['success']}; background: rgba(35,134,54,0.08); }}
+  .step-num  {{ font-size: 10px; font-weight: 700; text-transform: uppercase;
+                letter-spacing: 0.12em; color: {_C['muted']}; margin-bottom: 2px; }}
+  .step-name {{ font-size: 13px; font-weight: 600; color: #E6EDF3; }}
+
+  /* ── Agent pills ── */
+  .pill {{
+    display: inline-block; padding: 2px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; margin-right: 6px;
+  }}
+  .pill-scout    {{ background: rgba(56,189,248,0.15); color: {_C['scout']}; }}
+  .pill-writer   {{ background: rgba(74,222,128,0.15);  color: {_C['writer']}; }}
+  .pill-adversary{{ background: rgba(248,113,113,0.15); color: {_C['adversary']}; }}
+
+  /* ── Status badge ── */
+  .status-badge {{
+    display: inline-block; padding: 6px 16px; border-radius: 6px;
+    font-size: 0.82rem; background: rgba(99,102,241,0.12);
+    border: 1px solid rgba(99,102,241,0.3); color: #A5B4FC;
+    font-weight: 500;
+  }}
+
+  /* ── Verdict chips ── */
+  .verdict-accept  {{ color: #4ADE80; font-weight: 700; }}
+  .verdict-minor   {{ color: #FCD34D; font-weight: 700; }}
+  .verdict-major   {{ color: #F87171; font-weight: 700; }}
+  .verdict-reject  {{ color: #EF4444; font-weight: 700; }}
+
+  /* ── Info card ── */
+  .info-card {{
+    background: {_C['card']}; border: 1px solid {_C['border']};
+    border-radius: 8px; padding: 14px 18px; margin-bottom: 10px;
+    font-size: 0.84rem; line-height: 1.6; color: {_C['muted']};
+  }}
+  .info-card b {{ color: #C9D1D9; }}
+
+  /* ── Transcript divider ── */
+  .transcript-row {{
+    border-left: 2px solid {_C['border']}; padding-left: 14px;
+    margin-bottom: 18px;
+  }}
+  .transcript-row.scout    {{ border-color: {_C['scout']}; }}
+  .transcript-row.writer   {{ border-color: {_C['writer']}; }}
+  .transcript-row.adversary{{ border-color: {_C['adversary']}; }}
+
+  /* ── Sidebar ── */
+  .sb-section {{ font-size: 0.78rem; color: {_C['muted']}; margin-top: 6px; }}
+  .sb-label   {{ font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+                 letter-spacing: 0.12em; color: {_C['muted']}; margin-bottom: 4px; }}
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── API client ─────────────────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────
 def get_client() -> Optional[anthropic.Anthropic]:
     try:
         key = st.secrets.get("ANTHROPIC_API_KEY", "")
@@ -54,15 +117,50 @@ def get_client() -> Optional[anthropic.Anthropic]:
         key = ""
     if not key or key == "your-api-key-here":
         key = st.session_state.get("api_key_input", "")
-    if not key:
-        return None
-    return anthropic.Anthropic(api_key=key)
+    return anthropic.Anthropic(api_key=key) if key else None
+
+
+def _auth_err():
+    st.error(
+        "Invalid API key. Get one at "
+        "[console.anthropic.com](https://console.anthropic.com) "
+        "and update the sidebar or Streamlit Cloud secrets."
+    )
+
+
+def _score_html(score: int) -> str:
+    if score >= 8:
+        cls, label = "accept", "Accept"
+    elif score >= 6:
+        cls, label = "minor", "Minor Revision"
+    elif score >= 4:
+        cls, label = "major", "Major Revision"
+    else:
+        cls, label = "reject", "Reject"
+    return f'<span class="verdict-{cls}">{score}/10 — {label}</span>'
+
+
+_DB_LABELS = {
+    "search_pubmed": "PubMed",
+    "search_semantic_scholar": "Semantic Scholar",
+    "search_arxiv": "arXiv",
+    "search_biorxiv": "bioRxiv",
+    "verify_doi": "CrossRef",
+}
+
+def _tool_log_cb(log_list: list, ph):
+    def _cb(name, inputs):
+        label = _DB_LABELS.get(name, name)
+        q = inputs.get("query", inputs.get("doi", ""))
+        log_list.append(f"**{label}** — *{q}*")
+        ph.markdown("\n\n".join(log_list))
+    return _cb
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 🧠 NeuroResearch Agent")
-    st.markdown("*AI research infrastructure for neuroscience*")
+    st.markdown('<div class="sb-label">NeuroResearch Agent</div>', unsafe_allow_html=True)
+    st.markdown("Research infrastructure for neuroscience")
     st.divider()
 
     try:
@@ -72,101 +170,75 @@ with st.sidebar:
         has_key = False
 
     if not has_key:
-        st.markdown("**API Key**")
+        st.markdown('<div class="sb-label">API Key</div>', unsafe_allow_html=True)
         st.text_input("Anthropic API Key", type="password",
-                      key="api_key_input", placeholder="sk-ant-…")
+                      key="api_key_input", placeholder="sk-ant-…",
+                      label_visibility="collapsed")
         if not st.session_state.get("api_key_input"):
             st.warning("Enter your API key to use the agent.")
         st.divider()
 
-    st.markdown("**Three Modes**")
-    st.markdown("📚 **Literature Review** — 4-agent collaborative review")
-    st.markdown("🔬 **Research Assistant** — Q&A, gap finding, paper analysis")
-    st.markdown("⚡ **Contradiction Detector** — Find where evidence conflicts")
+    st.markdown('<div class="sb-label">Modes</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sb-section">'
+        '<b>Literature Review</b> — 3-agent collaborative synthesis<br>'
+        '<b>Research Assistant</b> — Q&amp;A, gap finding, paper analysis<br>'
+        '<b>Contradiction Detector</b> — Find where evidence conflicts'
+        '</div>',
+        unsafe_allow_html=True,
+    )
     st.divider()
-    st.markdown("**4-Agent Panel**")
-    st.markdown("👨‍🎓 PhD Student · 👨‍🏫 Supervisor")
-    st.markdown("🧑‍💻 Peer Researcher · 🔬 Journal Reviewer")
+
+    st.markdown('<div class="sb-label">Agent Panel</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="sb-section">'
+        f'<span style="color:{_C["scout"]}">Scout</span> — enriches the paper pool<br>'
+        f'<span style="color:{_C["writer"]}">Writer</span> — produces the review<br>'
+        f'<span style="color:{_C["adversary"]}">Adversary</span> — adversarial critique'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
     st.divider()
-    st.markdown("**Databases**")
-    st.markdown("PubMed · Semantic Scholar · arXiv · bioRxiv")
+    st.markdown('<div class="sb-label">Databases</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sb-section">PubMed · Semantic Scholar · arXiv · bioRxiv</div>',
+        unsafe_allow_html=True,
+    )
     st.divider()
-    st.markdown("*Powered by Claude claude-sonnet-4-6*")
+    st.markdown(
+        f'<div class="sb-section" style="color:{_C["muted"]}">Powered by Claude claude-sonnet-4-6</div>',
+        unsafe_allow_html=True,
+    )
 
 
-# ── Header ─────────────────────────────────────────────────────────────────────
-st.markdown('<div class="main-header">🧠 NeuroResearch Agent</div>', unsafe_allow_html=True)
+# ── Page header ────────────────────────────────────────────────────────────────
+st.markdown('<div class="nr-title">NeuroResearch Agent</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="sub-header">'
-    'Multi-Agent Literature Reviews &nbsp;·&nbsp; Research Q&A &nbsp;·&nbsp; '
-    'Contradiction Detection'
+    '<div class="nr-sub">'
+    'Multi-agent literature synthesis &nbsp;&middot;&nbsp; '
+    'Research Q&amp;A &nbsp;&middot;&nbsp; Contradiction detection'
     '</div>',
     unsafe_allow_html=True,
 )
 
-tab_litreview, tab_research, tab_contradiction = st.tabs([
-    "📚 Literature Review",
-    "🔬 Research Assistant",
-    "⚡ Contradiction Detector",
+tab_lit, tab_research, tab_contradiction = st.tabs([
+    "Literature Review",
+    "Research Assistant",
+    "Contradiction Detector",
 ])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SHARED HELPERS
+# TAB 1 — LITERATURE REVIEW
 # ══════════════════════════════════════════════════════════════════════════════
-_DB_LABELS = {
-    "search_pubmed": "PubMed",
-    "search_semantic_scholar": "Semantic Scholar",
-    "search_arxiv": "arXiv",
-    "search_biorxiv": "bioRxiv",
-    "verify_doi": "CrossRef",
-}
+with tab_lit:
 
-def _tool_log_callback(log_list: list, placeholder):
-    def _cb(name, inputs):
-        label = _DB_LABELS.get(name, name)
-        q = inputs.get("query", inputs.get("doi", ""))
-        log_list.append(f"🔍 **{label}**: *{q}*")
-        placeholder.markdown("\n".join(log_list))
-    return _cb
-
-_AGENT_EMOJI = {
-    "student": "👨‍🎓",
-    "supervisor": "👨‍🏫",
-    "peer": "🧑‍💻",
-    "reviewer": "🔬",
-    "system": "⚙️",
-}
-_AGENT_LABEL = {
-    "student": "PhD Student",
-    "supervisor": "Supervisor",
-    "peer": "Peer Researcher",
-    "reviewer": "Journal Reviewer",
-    "system": "System",
-}
-
-def _score_badge(score: int) -> str:
-    if score >= 9:
-        return f"✅ {score}/10 — Accept"
-    if score >= 7:
-        return f"🔄 {score}/10 — Minor Revision"
-    if score >= 5:
-        return f"⚠️ {score}/10 — Major Revision"
-    return f"❌ {score}/10 — Reject"
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — LITERATURE REVIEW (4-agent multi-agent)
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_litreview:
-
-    # ── State init ────────────────────────────────────────────────────────────
-    _LR_DEFAULT = {
-        "step": "idle",          # idle | searched | done
+    _LR_DEFAULT: dict = {
+        "step": "idle",
         "question": "",
         "paper_type": "Systematic Literature Review",
-        "max_rounds": 2,
-        "view_mode": "final",    # "verbose" | "final"
+        "max_rounds": 1,
+        "view_mode": "final",
         "papers_per_db": 10,
         "all_papers": [],
         "papers": [],
@@ -176,40 +248,63 @@ with tab_litreview:
         "selected_papers": [],
         "final_output": "",
         "final_papers": [],
-        "events": [],            # list of dicts (serialised AgentEvents)
+        "events": [],
         "verified": [],
         "final_score": None,
     }
+
     if "mlr" not in st.session_state:
         st.session_state["mlr"] = dict(_LR_DEFAULT)
     mlr = st.session_state["mlr"]
 
-    # ── Step indicator ────────────────────────────────────────────────────────
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        cls = "step-active" if mlr["step"] == "idle" else "step-done"
-        st.markdown(f'<div class="{cls}"><div class="step-label">Step 1</div>Search & Configure</div>',
-                    unsafe_allow_html=True)
-    with s2:
-        cls = "step-active" if mlr["step"] == "searched" else (
-              "step-done" if mlr["step"] == "done" else "")
-        st.markdown(f'<div class="{cls}"><div class="step-label">Step 2</div>Select Papers</div>',
-                    unsafe_allow_html=True)
-    with s3:
-        cls = "step-active" if mlr["step"] == "done" else ""
-        st.markdown(f'<div class="{cls}"><div class="step-label">Step 3</div>Review & Export</div>',
-                    unsafe_allow_html=True)
-    st.divider()
+    # ── Step bar ──────────────────────────────────────────────────────────────
+    def _step_cls(target: str) -> str:
+        order = {"idle": 0, "searched": 1, "done": 2}
+        cur = order.get(mlr["step"], 0)
+        tgt = order.get(target, 0)
+        if cur == tgt:
+            return "active"
+        if cur > tgt:
+            return "done"
+        return ""
+
+    st.markdown(
+        f'<div class="step-row">'
+        f'<div class="step-cell {_step_cls("idle")}">'
+        f'<div class="step-num">Step 1</div>'
+        f'<div class="step-name">Configure &amp; Search</div></div>'
+        f'<div class="step-cell {_step_cls("searched")}">'
+        f'<div class="step-num">Step 2</div>'
+        f'<div class="step-name">Select Papers</div></div>'
+        f'<div class="step-cell {_step_cls("done")}">'
+        f'<div class="step-num">Step 3</div>'
+        f'<div class="step-name">Review &amp; Export</div></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
     # ════════════════════════════════════════════════════════════════════════
     # STEP 1 — Configure & Search
     # ════════════════════════════════════════════════════════════════════════
-    with st.expander("📝 Step 1 — Define Research Question & Options",
+    with st.expander("Step 1 — Configure & Search",
                      expanded=(mlr["step"] == "idle")):
 
-        top_col, inp_col = st.columns([1, 2])
+        cfg_col, inp_col = st.columns([1, 2])
 
-        with top_col:
+        with cfg_col:
+            # How paper pool is built — explanation
+            st.markdown(
+                '<div class="info-card">'
+                '<b>Where does the paper pool come from?</b><br>'
+                'Clicking Search queries PubMed, Semantic Scholar, arXiv, and bioRxiv '
+                'using Claude-generated search terms. You then select which papers to '
+                'include before the agents start. The Scout agent additionally runs '
+                'targeted searches to find foundational or recent papers that the '
+                'initial query may have missed.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
             paper_type = st.selectbox(
                 "Paper type",
                 ["Systematic Literature Review", "Narrative Review / Synthesis",
@@ -217,22 +312,18 @@ with tab_litreview:
                 key="mlr_paper_type",
             )
             max_rounds = st.radio(
-                "Agent debate rounds",
-                [1, 2, 3],
-                index=1,
-                horizontal=True,
-                key="mlr_rounds",
-                help="1 = fast, 3 = highest quality. Each round: Supervisor → Peer → Reviewer → Student revises.",
-            )
-            view_mode = st.radio(
-                "Output mode",
-                ["Final output only", "Verbose (show all agent dialogue)"],
-                index=0,
-                key="mlr_view_mode",
+                "Adversarial review rounds",
+                [1, 2, 3], index=0, horizontal=True, key="mlr_rounds",
                 help=(
-                    "Verbose shows every agent's full output as it happens — "
-                    "great for transparency. Final-only is faster to read."
+                    "Each round: Adversary critiques → Writer revises. "
+                    "Stops early if the Adversary scores ≥ 7/10. "
+                    "1 round = ~5–7 API calls; 3 rounds = ~9 API calls."
                 ),
+            )
+            view_mode_raw = st.radio(
+                "Output mode",
+                ["Final output only", "Verbose — show all agent dialogue"],
+                index=0, key="mlr_view_mode",
             )
             papers_per_db = st.slider("Papers per database", 5, 20, 10, key="mlr_ppdb")
 
@@ -246,25 +337,34 @@ with tab_litreview:
                 "Glial cells in Alzheimer's disease pathology",
                 "Dopamine signalling in reward learning",
             ]
-            ex = st.selectbox("Quick example:", [""] + examples, key="mlr_example")
+            ex = st.selectbox("Example topics", [""] + examples, key="mlr_example")
             research_question = st.text_area(
-                "Research question / topic",
+                "Research question or topic",
                 value=ex if ex else "",
                 placeholder="e.g. What is the role of neuroinflammation in major depressive disorder?",
                 height=110, key="mlr_rq",
             )
 
-            st.markdown("""
-**How the 4-agent panel works:**
-> 👨‍🎓 **Student** writes the initial draft from your paper pool
-> 👨‍🏫 **Supervisor** critiques structure, rigour, and argument
-> 🧑‍💻 **Peer** searches for missing papers and adds perspectives
-> 🔬 **Reviewer** scores 1–10 (≥ 8 = accepted, else another round)
-> 👨‍🎓 **Student** revises and writes the final polished version
-""")
+            st.markdown(
+                '<div class="info-card">'
+                f'<b><span style="color:{_C["scout"]}">Scout</span></b> — '
+                'Enriches the paper pool with targeted searches. '
+                'Writes a field briefing (key themes, essential citations, visible debates) '
+                'that the Writer uses to orient the first draft.<br><br>'
+                f'<b><span style="color:{_C["writer"]}">Writer</span></b> — '
+                'Produces the full literature review from the enriched pool. '
+                'Only cites papers in the pool — never fabricates.<br><br>'
+                f'<b><span style="color:{_C["adversary"]}">Adversary</span></b> — '
+                'Adversarially reviews the draft. Searches for missing papers and '
+                'unsupported claims. Scores 1–10; score ≥ 7 triggers the final polish.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
-            search_btn = st.button("🔍 Search Databases", type="primary",
-                                   use_container_width=True, key="mlr_search")
+            search_btn = st.button(
+                "Search Databases", type="primary",
+                use_container_width=True, key="mlr_search",
+            )
 
         if search_btn:
             if not research_question.strip():
@@ -272,26 +372,29 @@ with tab_litreview:
             else:
                 client = get_client()
                 if not client:
-                    st.error("Please enter your Anthropic API key.")
+                    st.error("Enter your Anthropic API key in the sidebar.")
                     st.stop()
 
                 prog_ph = st.empty()
+
                 def _lr_prog(p: LitReviewProgress):
                     prog_ph.markdown(
-                        f'<div class="phase-badge">📍 {p.phase}: {p.message}</div>',
-                        unsafe_allow_html=True)
+                        f'<div class="status-badge">{p.phase}: {p.message}</div>',
+                        unsafe_allow_html=True,
+                    )
 
                 try:
-                    with st.spinner("Planning search strategy and querying 4 databases…"):
+                    with st.spinner("Querying 4 databases…"):
                         plan, all_papers, papers = plan_and_search(
-                            client, research_question, papers_per_db, _lr_prog)
+                            client, research_question, papers_per_db, _lr_prog,
+                        )
                 except anthropic.AuthenticationError:
                     prog_ph.empty()
-                    st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key.")
+                    _auth_err()
                     st.stop()
                 except Exception as e:
                     prog_ph.empty()
-                    st.error(f"❌ Search error: {e}")
+                    st.error(f"Search error: {e}")
                     st.stop()
 
                 prog_ph.empty()
@@ -305,17 +408,17 @@ with tab_litreview:
                     "question": research_question,
                     "paper_type": paper_type,
                     "max_rounds": max_rounds,
-                    "view_mode": "verbose" if "Verbose" in view_mode else "final",
+                    "view_mode": "verbose" if "Verbose" in view_mode_raw else "final",
                     "papers_per_db": papers_per_db,
                 }
                 st.rerun()
 
     # ════════════════════════════════════════════════════════════════════════
-    # STEP 2 — Paper Selection
+    # STEP 2 — Paper selection
     # ════════════════════════════════════════════════════════════════════════
     if mlr["step"] in ("searched", "done"):
         with st.expander(
-            f"📄 Step 2 — Select Papers  "
+            f"Step 2 — Select Papers  "
             f"({mlr['n_deduped']} unique · {mlr['n_raw']} retrieved)",
             expanded=(mlr["step"] == "searched"),
         ):
@@ -333,13 +436,18 @@ with tab_litreview:
                         "Citations": p.get("citations", ""),
                     })
                 df = pd.DataFrame(df_data)
-                st.markdown("Toggle papers to **exclude**. All included by default.")
+
+                st.caption(
+                    "Toggle the Include column to exclude papers. "
+                    "All are included by default. "
+                    "The Scout will also search for additional papers you may have missed."
+                )
                 edited = st.data_editor(
                     df,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "Include": st.column_config.CheckboxColumn("✅", default=True, width="small"),
+                        "Include": st.column_config.CheckboxColumn("Include", default=True, width="small"),
                         "#": st.column_config.NumberColumn("#", width="small"),
                         "Title": st.column_config.TextColumn("Title", width="large"),
                         "Year": st.column_config.TextColumn("Year", width="small"),
@@ -347,119 +455,102 @@ with tab_litreview:
                         "Citations": st.column_config.NumberColumn("Citations", width="small"),
                     },
                     disabled=["#", "Title", "Year", "Source", "Citations"],
-                    key="mlr_paper_editor",
+                    key="mlr_editor",
                 )
 
-                selected_indices = edited[edited["Include"] == True]["#"].tolist()
-                n_sel = len(selected_indices)
-                st.caption(f"{n_sel} papers selected for the agent panel.")
+                selected_idx = edited[edited["Include"] == True]["#"].tolist()
+                n_sel = len(selected_idx)
+                st.caption(f"{n_sel} papers selected.")
 
-                btn_col1, btn_col2, btn_col3 = st.columns([2, 2, 1])
-                with btn_col1:
+                b1, b2, b3 = st.columns([2, 2, 1])
+                with b1:
                     run_btn = st.button(
-                        f"🚀 Run 4-Agent Review ({n_sel} papers)",
+                        f"Run Agent Review  ({n_sel} papers)",
                         type="primary", use_container_width=True,
                         disabled=(n_sel == 0), key="mlr_run",
                     )
-                with btn_col2:
+                with b2:
                     auto_btn = st.button(
-                        "🤖 Auto-select Best Papers, then Run",
+                        "Auto-select best papers, then run",
                         use_container_width=True, key="mlr_auto",
                     )
-                with btn_col3:
-                    if st.button("🗑️ Reset", use_container_width=True, key="mlr_reset"):
+                with b3:
+                    if st.button("Reset", use_container_width=True, key="mlr_reset"):
                         st.session_state["mlr"] = dict(_LR_DEFAULT)
                         st.rerun()
 
-                # ── Run the multi-agent pipeline ──────────────────────────────
+                # ── Orchestrator runner ───────────────────────────────────────
                 def _run_agents(client, selected_papers):
-                    """Launch the orchestrator with real-time event rendering."""
-
                     verbose = (mlr["view_mode"] == "verbose")
-                    total_steps = 1 + mlr["max_rounds"] * 4
-                    step_counter = [0]
+                    total_steps = 2 + mlr["max_rounds"] * 2   # scout + draft + (adversary+writer)*rounds
+                    step_ctr = [0]
 
                     status_ph = st.empty()
                     prog_bar  = st.progress(0)
+
                     if verbose:
                         st.markdown("---")
-                        st.markdown("### 🎭 Agent Collaboration Transcript")
-                        events_container = st.container()
+                        st.markdown("**Agent Collaboration Transcript**")
+                        ev_container = st.container()
 
                     def on_event(ev: AgentEvent):
-                        emoji = _AGENT_EMOJI.get(ev.agent, "🤖")
-                        label = _AGENT_LABEL.get(ev.agent, ev.agent)
+                        agent_color = _C.get(ev.agent, _C["muted"])
 
-                        # Advance progress on status events (one per major action)
                         if ev.phase == PHASE_STATUS:
-                            step_counter[0] = min(step_counter[0] + 1, total_steps - 1)
-                            prog_bar.progress(step_counter[0] / total_steps)
+                            step_ctr[0] = min(step_ctr[0] + 1, total_steps - 1)
+                            prog_bar.progress(step_ctr[0] / total_steps)
                             status_ph.markdown(
-                                f'<div class="phase-badge">'
-                                f'{emoji} **{label}** (Round {ev.round}): {ev.content}'
+                                f'<div class="status-badge">'
+                                f'<span style="color:{agent_color}">{ev.agent.upper()}</span>'
+                                f' &nbsp;— {ev.content}'
                                 f'</div>',
                                 unsafe_allow_html=True,
                             )
+                            return
 
                         if not verbose:
-                            return  # Final-only mode: no transcript rendering
+                            return
 
-                        # Verbose: render full content in expanders
-                        if ev.phase == PHASE_DRAFT:
-                            with events_container:
-                                with st.expander(
-                                    f"{emoji} PhD Student — Initial Draft (Round 0)",
-                                    expanded=False,
-                                ):
+                        pill = (f'<span class="pill pill-{ev.agent}">{ev.agent}</span>'
+                                f'Round {ev.round}')
+
+                        if ev.phase == PHASE_BRIEFING:
+                            with ev_container:
+                                with st.expander("Scout — Field Briefing", expanded=False):
+                                    st.markdown(ev.content)
+
+                        elif ev.phase == PHASE_DRAFT:
+                            with ev_container:
+                                with st.expander("Writer — Initial Draft", expanded=False):
                                     st.markdown(ev.content)
 
                         elif ev.phase == PHASE_REVISION:
-                            with events_container:
-                                with st.expander(
-                                    f"{emoji} PhD Student — Revised Draft (Round {ev.round})",
-                                    expanded=False,
-                                ):
+                            with ev_container:
+                                with st.expander(f"Writer — Revision (Round {ev.round})", expanded=False):
                                     st.markdown(ev.content)
 
                         elif ev.phase == PHASE_FINAL:
-                            score_txt = _score_badge(ev.score) if ev.score else ""
-                            with events_container:
+                            badge = _score_html(ev.score) if ev.score else ""
+                            with ev_container:
                                 with st.expander(
-                                    f"{emoji} PhD Student — Final Polished Version  |  {score_txt}",
+                                    f"Writer — Final Version  |  {ev.score}/10" if ev.score else "Writer — Final Version",
                                     expanded=False,
                                 ):
                                     st.markdown(ev.content)
 
-                        elif ev.phase == PHASE_FEEDBACK and ev.agent == "supervisor":
-                            with events_container:
+                        elif ev.phase == PHASE_FEEDBACK:
+                            badge = f"  ({ev.score}/10)" if ev.score else ""
+                            with ev_container:
                                 with st.expander(
-                                    f"👨‍🏫 Supervisor Feedback — Round {ev.round}",
-                                    expanded=False,
-                                ):
-                                    st.markdown(ev.content)
-
-                        elif ev.phase == PHASE_FEEDBACK and ev.agent == "peer":
-                            with events_container:
-                                with st.expander(
-                                    f"🧑‍💻 Peer Feedback — Round {ev.round}",
-                                    expanded=False,
-                                ):
-                                    st.markdown(ev.content)
-
-                        elif ev.phase == PHASE_FEEDBACK and ev.agent == "reviewer":
-                            badge = _score_badge(ev.score) if ev.score else ""
-                            with events_container:
-                                with st.expander(
-                                    f"🔬 Journal Reviewer — Round {ev.round}  |  {badge}",
+                                    f"Adversary — Critique Round {ev.round}{badge}",
                                     expanded=False,
                                 ):
                                     st.markdown(ev.content)
 
                         elif ev.phase == PHASE_TOOL:
-                            with events_container:
-                                st.caption(f"🧑‍💻 Peer searching: *{ev.content}*")
+                            with ev_container:
+                                st.caption(f"{ev.agent.title()} searched: {ev.content}")
 
-                    # ── Call orchestrator ─────────────────────────────────────
                     try:
                         final_output, all_events, final_papers = run_multi_agent_review(
                             client=client,
@@ -474,73 +565,68 @@ with tab_litreview:
                     except anthropic.AuthenticationError:
                         status_ph.empty()
                         prog_bar.empty()
-                        st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key.")
+                        _auth_err()
                         st.stop()
                     except Exception as e:
                         status_ph.empty()
                         prog_bar.empty()
-                        st.error(f"❌ Multi-agent error: {e}")
+                        st.error(f"Agent error: {e}")
                         st.stop()
 
                     prog_bar.progress(1.0)
                     status_ph.markdown(
-                        '<div class="phase-badge">✅ Multi-agent review complete!</div>',
+                        '<div class="status-badge">Review complete</div>',
                         unsafe_allow_html=True,
                     )
 
-                    # Verify citations + build disclaimer
                     with st.spinner("Verifying citations via CrossRef…"):
                         verified = verify_citations(final_papers)
-                    n_included = len(final_papers)
-                    disclaimer = build_disclaimer(mlr["n_raw"], mlr["n_deduped"], n_included)
+
+                    disclaimer = build_disclaimer(mlr["n_raw"], mlr["n_deduped"], len(final_papers))
                     final_output += disclaimer
 
-                    # Find final reviewer score
                     final_score = next(
                         (e.score for e in reversed(all_events)
-                         if e.phase == PHASE_FEEDBACK and e.agent == "reviewer" and e.score),
+                         if e.phase == PHASE_FEEDBACK and e.score),
                         None,
                     )
-
-                    # Serialise events for replay in done state
-                    serialised = [
-                        {"agent": e.agent, "round": e.round, "phase": e.phase,
-                         "content": e.content, "score": e.score}
-                        for e in all_events
-                    ]
 
                     mlr.update({
                         "step": "done",
                         "selected_papers": selected_papers,
                         "final_output": final_output,
                         "final_papers": final_papers,
-                        "events": serialised,
+                        "events": [
+                            {"agent": e.agent, "round": e.round, "phase": e.phase,
+                             "content": e.content, "score": e.score}
+                            for e in all_events
+                        ],
                         "verified": verified,
                         "final_score": final_score,
                     })
                     st.rerun()
 
-                if run_btn and selected_indices:
+                if run_btn and selected_idx:
                     client = get_client()
                     if not client:
-                        st.error("Please enter your Anthropic API key.")
+                        st.error("Enter your Anthropic API key.")
                         st.stop()
-                    chosen = [mlr["papers"][i] for i in selected_indices if i < len(mlr["papers"])]
+                    chosen = [mlr["papers"][i] for i in selected_idx if i < len(mlr["papers"])]
                     _run_agents(client, chosen)
 
                 if auto_btn:
                     client = get_client()
                     if not client:
-                        st.error("Please enter your Anthropic API key.")
+                        st.error("Enter your Anthropic API key.")
                         st.stop()
                     try:
-                        with st.spinner("AI screening papers…"):
+                        with st.spinner("AI selecting best papers…"):
                             chosen = ai_screen_papers(client, mlr["question"], mlr["papers"])
                     except anthropic.AuthenticationError:
-                        st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key.")
+                        _auth_err()
                         st.stop()
                     except Exception as e:
-                        st.error(f"❌ Screening error: {e}")
+                        st.error(f"Screening error: {e}")
                         st.stop()
                     _run_agents(client, chosen)
 
@@ -550,18 +636,22 @@ with tab_litreview:
     if mlr["step"] == "done" and mlr["final_output"]:
         st.divider()
 
-        score_txt = _score_badge(mlr["final_score"]) if mlr["final_score"] else ""
-        st.success(
-            f"✅ Review ready — {len(mlr['final_papers'])} papers synthesised by 4-agent panel  "
-            f"{'· Final score: **' + score_txt + '**' if score_txt else ''}"
+        # Header row
+        score_html = _score_html(mlr["final_score"]) if mlr["final_score"] else ""
+        summary_md = (
+            f"{len(mlr['final_papers'])} papers synthesised"
+            + (f"   ·   Final verdict: " if mlr["final_score"] else "")
         )
+        st.success(summary_md)
+        if score_html:
+            st.markdown(score_html, unsafe_allow_html=True)
 
-        # Download / reset row
+        # Download / reset
         dl_col, clr_col = st.columns([4, 1])
         with dl_col:
             safe = mlr["question"][:50].replace(" ", "_").replace("/", "-")
             st.download_button(
-                "⬇️ Download Review (.md)",
+                "Download Review (.md)",
                 data=mlr["final_output"],
                 file_name=f"litreview_{safe}.md",
                 mime="text/markdown",
@@ -570,84 +660,109 @@ with tab_litreview:
                 key="mlr_dl",
             )
         with clr_col:
-            if st.button("🗑️ New Review", use_container_width=True, key="mlr_new"):
+            if st.button("New Review", use_container_width=True, key="mlr_new"):
                 st.session_state["mlr"] = dict(_LR_DEFAULT)
                 st.rerun()
 
-        # ── Agent transcript (always available, collapsed by default) ────────
-        if mlr["events"]:
-            event_count = sum(
-                1 for e in mlr["events"]
-                if e["phase"] in (PHASE_DRAFT, PHASE_REVISION, PHASE_FINAL, PHASE_FEEDBACK)
-            )
+        # Agent transcript
+        content_events = [e for e in mlr["events"]
+                          if e["phase"] in (PHASE_BRIEFING, PHASE_DRAFT, PHASE_REVISION,
+                                            PHASE_FINAL, PHASE_FEEDBACK)]
+        if content_events:
             with st.expander(
-                f"🎭 Agent Collaboration Transcript ({event_count} exchanges)",
+                f"Agent Collaboration Transcript ({len(content_events)} exchanges)",
                 expanded=(mlr["view_mode"] == "verbose"),
             ):
                 for e in mlr["events"]:
-                    if e["phase"] == PHASE_STATUS:
-                        continue  # skip status noise
-                    emoji = _AGENT_EMOJI.get(e["agent"], "🤖")
-                    label = _AGENT_LABEL.get(e["agent"], e["agent"])
+                    agent = e["agent"]
                     rnd   = e["round"]
+                    phase = e["phase"]
 
-                    if e["phase"] == PHASE_DRAFT:
-                        st.markdown(f"**{emoji} {label} — Initial Draft**")
-                        with st.expander("Show initial draft", expanded=False):
-                            st.markdown(e["content"])
-                    elif e["phase"] == PHASE_REVISION:
-                        st.markdown(f"**{emoji} {label} — Revised Draft (Round {rnd})**")
-                        with st.expander(f"Show revision {rnd}", expanded=False):
-                            st.markdown(e["content"])
-                    elif e["phase"] == PHASE_FINAL:
-                        badge = _score_badge(e["score"]) if e["score"] else ""
-                        st.markdown(f"**{emoji} {label} — Final Version  |  {badge}**")
-                        with st.expander("Show final draft (pre-formatted)", expanded=False):
-                            st.markdown(e["content"])
-                    elif e["phase"] == PHASE_FEEDBACK:
-                        if e["agent"] == "reviewer":
-                            badge = _score_badge(e["score"]) if e["score"] else ""
-                            st.markdown(f"**🔬 Journal Reviewer — Round {rnd}  |  {badge}**")
-                        else:
-                            st.markdown(f"**{emoji} {label} — Round {rnd} Feedback**")
-                        with st.expander(f"Show {label} feedback (Round {rnd})", expanded=False):
-                            st.markdown(e["content"])
-                    elif e["phase"] == PHASE_TOOL:
-                        st.caption(f"🧑‍💻 Peer searched: *{e['content']}*")
-                    st.divider()
+                    if phase == PHASE_STATUS:
+                        continue
 
-        # ── Citation verification ────────────────────────────────────────────
+                    color = _C.get(agent, _C["muted"])
+                    label = agent.title()
+
+                    if phase == PHASE_BRIEFING:
+                        st.markdown(f'<div class="transcript-row scout">'
+                                    f'<strong style="color:{color}">Scout — Field Briefing</strong>'
+                                    f'</div>', unsafe_allow_html=True)
+                        with st.expander("View briefing", expanded=False):
+                            st.markdown(e["content"])
+
+                    elif phase == PHASE_DRAFT:
+                        st.markdown(f'<div class="transcript-row writer">'
+                                    f'<strong style="color:{color}">Writer — Initial Draft</strong>'
+                                    f'</div>', unsafe_allow_html=True)
+                        with st.expander("View initial draft", expanded=False):
+                            st.markdown(e["content"])
+
+                    elif phase == PHASE_REVISION:
+                        st.markdown(f'<div class="transcript-row writer">'
+                                    f'<strong style="color:{color}">Writer — Revision (Round {rnd})</strong>'
+                                    f'</div>', unsafe_allow_html=True)
+                        with st.expander(f"View revision {rnd}", expanded=False):
+                            st.markdown(e["content"])
+
+                    elif phase == PHASE_FINAL:
+                        badge = _score_html(e["score"]) if e["score"] else ""
+                        st.markdown(
+                            f'<div class="transcript-row writer">'
+                            f'<strong style="color:{color}">Writer — Final Version</strong>'
+                            + (f'&nbsp;&nbsp;{badge}' if badge else '')
+                            + f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                        with st.expander("View final draft (pre-formatted output)", expanded=False):
+                            st.markdown(e["content"])
+
+                    elif phase == PHASE_FEEDBACK:
+                        badge = _score_html(e["score"]) if e["score"] else ""
+                        st.markdown(
+                            f'<div class="transcript-row adversary">'
+                            f'<strong style="color:{color}">Adversary — Critique Round {rnd}</strong>'
+                            + (f'&nbsp;&nbsp;{badge}' if badge else '')
+                            + f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                        with st.expander(f"View adversary critique (Round {rnd})", expanded=False):
+                            st.markdown(e["content"])
+
+                    elif phase == PHASE_TOOL:
+                        st.caption(f"{label} searched: {e['content']}")
+
+        # Citation verification
         if mlr["verified"]:
-            with st.expander("🔍 Citation Verification Report", expanded=True):
+            with st.expander("Citation Verification Report", expanded=True):
                 status_icon = {
-                    "verified": "✅ Verified",
-                    "preprint": "⚠️ Preprint",
-                    "not_found": "❌ Not found",
-                    "no_doi": "❓ No DOI",
+                    "verified":  "Verified",
+                    "preprint":  "Preprint",
+                    "not_found": "Not found",
+                    "no_doi":    "No DOI",
                 }
-                rows = []
-                for v in mlr["verified"]:
-                    rows.append({
-                        "Ref": f"[{v['index']}]",
-                        "Status": status_icon.get(v["status"], v["status"]),
-                        "Title": v["title"],
-                        "Journal": v.get("journal", ""),
-                        "DOI/URL": v.get("doi") or v.get("url", ""),
-                    })
+                rows = [{
+                    "Ref":     f"[{v['index']}]",
+                    "Status":  status_icon.get(v["status"], v["status"]),
+                    "Title":   v["title"],
+                    "Journal": v.get("journal", ""),
+                    "DOI/URL": v.get("doi") or v.get("url", ""),
+                } for v in mlr["verified"]]
                 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
                 n_ok  = sum(1 for v in mlr["verified"] if v["status"] == "verified")
                 n_pre = sum(1 for v in mlr["verified"] if v["status"] == "preprint")
                 n_bad = sum(1 for v in mlr["verified"]
                             if v["status"] in ("not_found", "no_doi"))
                 st.caption(
-                    f"✅ {n_ok} verified via CrossRef · "
-                    f"⚠️ {n_pre} preprints · "
-                    f"❓ {n_bad} unverified (check manually before citing)"
+                    f"{n_ok} verified via CrossRef · "
+                    f"{n_pre} preprints (not peer-reviewed) · "
+                    f"{n_bad} unverified — check manually before citing"
                 )
 
-        # ── Final review output ──────────────────────────────────────────────
+        # Final review body
         st.markdown("---")
-        st.markdown("### 📄 Final Literature Review")
+        st.markdown("### Final Literature Review")
         st.markdown(mlr["final_output"])
 
 
@@ -658,20 +773,15 @@ with tab_research:
     col_main, col_help = st.columns([3, 1])
 
     with col_help:
-        with st.expander("💡 What can I ask?", expanded=True):
-            st.markdown("""
-**Research Q&A**
-> *"What is the role of astrocytes in synaptic pruning?"*
-> *"Explain the complement cascade in neurodegeneration"*
-
-**Gap Finder**
-> *"What are open questions in hippocampal place cells?"*
-> *"What gaps exist in microglia's role in depression?"*
-
-**Paper Deep-Dive**
-> *"Critique the default mode network in Alzheimer's"*
-> *"Analyse: Attractor dynamics in neural circuits"*
-            """)
+        with st.expander("What can I ask?", expanded=True):
+            st.markdown(
+                "**Research Q&A**\n"
+                "> *What is the role of astrocytes in synaptic pruning?*\n\n"
+                "**Gap Finder**\n"
+                "> *What are open questions in hippocampal place cells?*\n\n"
+                "**Paper Deep-Dive**\n"
+                "> *Critique the default mode network in Alzheimer's*"
+            )
 
     with col_main:
         if "research_messages" not in st.session_state:
@@ -679,53 +789,52 @@ with tab_research:
 
         b1, b2, _ = st.columns([1, 1, 2])
         with b1:
-            if st.button("🗑️ Clear", key="clear_research", use_container_width=True):
+            if st.button("Clear", key="clear_research", use_container_width=True):
                 st.session_state.research_messages = []
                 st.rerun()
         with b2:
             if st.session_state.research_messages:
-                def _export_chat():
-                    lines = ["# NeuroResearch Agent — Research Session\n"]
+                def _export():
+                    lines = ["# NeuroResearch — Research Session\n"]
                     for m in st.session_state.research_messages:
                         role = "**You**" if m["role"] == "user" else "**Agent**"
                         lines.append(f"### {role}\n\n{m['content']}\n\n---\n")
                     return "\n".join(lines)
                 st.download_button(
-                    "⬇️ Export", data=_export_chat(),
+                    "Export session", data=_export(),
                     file_name="research_session.md", mime="text/markdown",
                     use_container_width=True, key="export_research",
                 )
 
         for msg in st.session_state.research_messages:
-            with st.chat_message(msg["role"],
-                                 avatar="🧠" if msg["role"] == "assistant" else "👤"):
+            with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
         if prompt := st.chat_input("Ask a neuroscience question, find gaps, or analyse a paper…"):
             client = get_client()
             if not client:
-                st.error("Please enter your Anthropic API key in the sidebar.")
+                st.error("Enter your Anthropic API key in the sidebar.")
                 st.stop()
 
-            with st.chat_message("user", avatar="👤"):
+            with st.chat_message("user"):
                 st.markdown(prompt)
             st.session_state.research_messages.append({"role": "user", "content": prompt})
 
-            with st.chat_message("assistant", avatar="🧠"):
+            with st.chat_message("assistant"):
                 tool_ph = st.empty()
                 resp_ph = st.empty()
                 log = []
                 try:
-                    with st.spinner("Searching databases…"):
+                    with st.spinner("Searching…"):
                         api_msgs = [{"role": m["role"], "content": m["content"]}
                                     for m in st.session_state.research_messages]
                         response = run_research_turn(
                             client, api_msgs,
-                            on_tool_call=_tool_log_callback(log, tool_ph),
+                            on_tool_call=_tool_log_cb(log, tool_ph),
                         )
                     tool_ph.empty()
                     if log:
-                        with st.expander(f"📡 Searched {len(log)} database(s)", expanded=False):
+                        with st.expander(f"Searched {len(log)} database(s)", expanded=False):
                             for l in log:
                                 st.markdown(l)
                     resp_ph.markdown(response)
@@ -734,34 +843,34 @@ with tab_research:
                 except anthropic.AuthenticationError:
                     tool_ph.empty()
                     st.session_state.research_messages.pop()
-                    st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key.")
+                    _auth_err()
                 except Exception as e:
                     tool_ph.empty()
                     st.session_state.research_messages.pop()
-                    st.error(f"❌ Unexpected error: {e}")
+                    st.error(f"Error: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — CONTRADICTION DETECTOR
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_contradiction:
-    st.markdown("### ⚡ Contradiction Detector")
+    st.markdown("### Contradiction Detector")
     st.markdown(
-        "Enter a specific neuroscience claim or finding. "
-        "The agent searches for papers that **support it AND contradict it**, "
-        "then explains *why* the evidence conflicts — methods, populations, replication status."
+        "Enter a specific neuroscience claim. "
+        "The agent searches for papers that support and contradict it, "
+        "then explains why the evidence conflicts."
     )
 
     col_in, col_ex = st.columns([2, 1])
     with col_ex:
-        with st.expander("📝 Example claims", expanded=True):
-            st.markdown("""
-- *"SSRIs increase adult hippocampal neurogenesis"*
-- *"The gut microbiome influences anxiety behaviour in mice"*
-- *"Amyloid plaques cause Alzheimer's disease"*
-- *"Sleep deprivation impairs long-term potentiation"*
-- *"Microglia are the primary mediators of synaptic pruning"*
-            """)
+        with st.expander("Example claims", expanded=True):
+            st.markdown(
+                "- *SSRIs increase adult hippocampal neurogenesis*\n"
+                "- *The gut microbiome influences anxiety behaviour in mice*\n"
+                "- *Amyloid plaques cause Alzheimer's disease*\n"
+                "- *Sleep deprivation impairs long-term potentiation*\n"
+                "- *Microglia are the primary mediators of synaptic pruning*"
+            )
 
     with col_in:
         claim = st.text_area(
@@ -774,7 +883,7 @@ with tab_contradiction:
             st.session_state["cd_result"] = ""
             st.session_state["cd_claim_used"] = ""
 
-        cd_btn = st.button("🔍 Analyse Contradictions", type="primary",
+        cd_btn = st.button("Analyse Contradictions", type="primary",
                            use_container_width=True, key="cd_run")
 
         if cd_btn:
@@ -783,7 +892,7 @@ with tab_contradiction:
             else:
                 client = get_client()
                 if not client:
-                    st.error("Please enter your Anthropic API key.")
+                    st.error("Enter your Anthropic API key.")
                     st.stop()
                 tool_ph = st.empty()
                 log = []
@@ -791,15 +900,15 @@ with tab_contradiction:
                     with st.spinner("Searching for supporting and contradicting evidence…"):
                         result = detect_contradictions(
                             client, claim,
-                            on_tool_call=_tool_log_callback(log, tool_ph),
+                            on_tool_call=_tool_log_cb(log, tool_ph),
                         )
                 except anthropic.AuthenticationError:
                     tool_ph.empty()
-                    st.error("❌ **Invalid API key.** Go to [console.anthropic.com](https://console.anthropic.com) to get a valid key.")
+                    _auth_err()
                     st.stop()
                 except Exception as e:
                     tool_ph.empty()
-                    st.error(f"❌ Unexpected error: {e}")
+                    st.error(f"Error: {e}")
                     st.stop()
                 tool_ph.empty()
                 st.session_state["cd_result"] = result
@@ -808,20 +917,19 @@ with tab_contradiction:
 
     if st.session_state.get("cd_result"):
         st.divider()
-        st.success(f"Contradiction report for: *{st.session_state['cd_claim_used'][:80]}*")
-        dl2, clr2 = st.columns([4, 1])
-        with dl2:
-            safe2 = st.session_state["cd_claim_used"][:40].replace(" ", "_")
+        st.success(f"Report for: *{st.session_state['cd_claim_used'][:80]}*")
+        dl_col, clr_col = st.columns([4, 1])
+        with dl_col:
+            safe = st.session_state["cd_claim_used"][:40].replace(" ", "_")
             st.download_button(
-                "⬇️ Download Report (.md)",
+                "Download Report (.md)",
                 data=st.session_state["cd_result"],
-                file_name=f"contradiction_{safe2}.md",
+                file_name=f"contradiction_{safe}.md",
                 mime="text/markdown",
-                use_container_width=True,
-                key="cd_dl",
+                use_container_width=True, key="cd_dl",
             )
-        with clr2:
-            if st.button("🗑️ Clear", use_container_width=True, key="cd_clr"):
+        with clr_col:
+            if st.button("Clear", use_container_width=True, key="cd_clr"):
                 st.session_state["cd_result"] = ""
                 st.rerun()
         st.markdown(st.session_state["cd_result"])
