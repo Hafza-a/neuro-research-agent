@@ -35,8 +35,11 @@ def _call_with_continuation(
     messages: list,
     max_tokens: int = 6000,
     max_passes: int = 3,
+    usage_out: dict = None,
 ) -> str:
     full_text = ""
+    total_input = 0
+    total_output = 0
     msgs = list(messages)
     for _ in range(max_passes):
         response = client.messages.create(
@@ -45,6 +48,8 @@ def _call_with_continuation(
             system=system,
             messages=msgs,
         )
+        total_input += response.usage.input_tokens
+        total_output += response.usage.output_tokens
         chunk = "".join(b.text for b in response.content if b.type == "text")
         full_text += chunk
         if response.stop_reason != "max_tokens":
@@ -58,6 +63,9 @@ def _call_with_continuation(
                 "Resume from the last word immediately."
             ),
         })
+    if usage_out is not None:
+        usage_out["input_tokens"] = total_input
+        usage_out["output_tokens"] = total_output
     return full_text
 
 
@@ -71,6 +79,7 @@ def writer_draft(
     scout_briefing: str,
     n_raw: int,
     n_deduped: int,
+    usage_out: dict = None,
 ) -> str:
     papers_text = _format_papers(papers)
     prompt = f"""Write a **{paper_type}** on:
@@ -93,7 +102,7 @@ Write the complete {paper_type} now. Use (First Author et al., Year) citations i
     return _call_with_continuation(
         client, WRITER_SYSTEM_PROMPT,
         [{"role": "user", "content": prompt}],
-        max_tokens=6000, max_passes=3,
+        max_tokens=6000, max_passes=3, usage_out=usage_out,
     )
 
 
@@ -104,6 +113,7 @@ def writer_revise(
     scout_briefing: str,
     draft: str,
     critique: str,
+    usage_out: dict = None,
 ) -> str:
     papers_text = _format_papers(papers)
     prompt = f"""You are revising your literature review on:
@@ -131,7 +141,7 @@ Write the complete revised literature review now. Do not introduce citations tha
     return _call_with_continuation(
         client, WRITER_SYSTEM_PROMPT,
         [{"role": "user", "content": prompt}],
-        max_tokens=6000, max_passes=3,
+        max_tokens=6000, max_passes=3, usage_out=usage_out,
     )
 
 
@@ -142,6 +152,7 @@ def writer_final_polish(
     scout_briefing: str,
     draft: str,
     critique: str,
+    usage_out: dict = None,
 ) -> str:
     papers_text = _format_papers(papers)
     prompt = f"""Write the **final, publication-ready** version of your literature review on:
@@ -170,5 +181,5 @@ Write the complete, polished final version now. Ensure:
     return _call_with_continuation(
         client, WRITER_SYSTEM_PROMPT,
         [{"role": "user", "content": prompt}],
-        max_tokens=6000, max_passes=3,
+        max_tokens=6000, max_passes=3, usage_out=usage_out,
     )

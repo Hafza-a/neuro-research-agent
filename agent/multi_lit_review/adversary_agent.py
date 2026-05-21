@@ -74,6 +74,7 @@ def adversary_critique(
     research_question: str,
     current_papers: list,
     on_tool_call=None,
+    usage_out: dict = None,
 ) -> tuple:
     """
     Adversarially reviews the draft, searches for missing/contradicting papers.
@@ -85,9 +86,8 @@ def adversary_critique(
     """
     existing_titles = {(p.get("title") or "").lower().strip() for p in current_papers}
     new_papers: list = []
-
-    # Truncate draft to keep context manageable (adversary doesn't need full text)
-    draft_preview = draft[:6000] + ("\n\n[... continues ...]" if len(draft) > 6000 else "")
+    total_input = 0
+    total_output = 0
 
     loop_messages = [{
         "role": "user",
@@ -95,7 +95,7 @@ def adversary_critique(
             f"Review this literature review on: \"{research_question}\"\n\n"
             "Search for missing or contradicting papers, then write your adversarial critique "
             "following your instructions.\n\n"
-            f"---\n{draft_preview}\n---"
+            f"---\n{draft}\n---"
         ),
     }]
 
@@ -107,12 +107,17 @@ def adversary_critique(
             tools=TOOLS,
             messages=loop_messages,
         )
+        total_input += response.usage.input_tokens
+        total_output += response.usage.output_tokens
 
         tool_uses = [b for b in response.content if b.type == "tool_use"]
 
         if not tool_uses:
             critique = "".join(b.text for b in response.content if b.type == "text")
             score = _parse_score(critique)
+            if usage_out is not None:
+                usage_out["input_tokens"] = total_input
+                usage_out["output_tokens"] = total_output
             return critique, score, new_papers
 
         if on_tool_call:

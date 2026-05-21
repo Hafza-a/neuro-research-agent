@@ -80,6 +80,7 @@ def scout_enrich(
     research_question: str,
     papers: list,
     on_tool_call=None,
+    usage_out: dict = None,
 ) -> tuple:
     """
     Scout enriches the paper pool and produces a field briefing.
@@ -90,6 +91,8 @@ def scout_enrich(
     """
     existing_titles = {(p.get("title") or "").lower().strip() for p in papers}
     new_papers: list = []
+    total_input = 0
+    total_output = 0
 
     loop_messages = [{
         "role": "user",
@@ -113,11 +116,16 @@ def scout_enrich(
             tools=TOOLS,
             messages=loop_messages,
         )
+        total_input += response.usage.input_tokens
+        total_output += response.usage.output_tokens
 
         tool_uses = [b for b in response.content if b.type == "tool_use"]
 
         if not tool_uses:
             briefing = "".join(b.text for b in response.content if b.type == "text")
+            if usage_out is not None:
+                usage_out["input_tokens"] = total_input
+                usage_out["output_tokens"] = total_output
             return briefing, new_papers
 
         if on_tool_call:

@@ -12,8 +12,10 @@ from agent.contradiction_agent import detect_contradictions
 from agent.multi_lit_review.orchestrator import (
     run_multi_agent_review, AgentEvent,
     PHASE_BRIEFING, PHASE_DRAFT, PHASE_REVISION, PHASE_FINAL,
-    PHASE_FEEDBACK, PHASE_STATUS, PHASE_TOOL,
+    PHASE_FEEDBACK, PHASE_STATUS, PHASE_TOOL, PHASE_TOKENS,
+    RUN_MODES,
 )
+from agent.evaluator_agent import evaluate_output, EvalScore
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -238,6 +240,7 @@ with tab_lit:
         "question": "",
         "paper_type": "Systematic Literature Review",
         "max_rounds": 1,
+        "run_mode": "standard",
         "view_mode": "final",
         "papers_per_db": 10,
         "all_papers": [],
@@ -251,6 +254,8 @@ with tab_lit:
         "events": [],
         "verified": [],
         "final_score": None,
+        "token_summary": [],
+        "eval_score": None,
     }
 
     if "mlr" not in st.session_state:
@@ -324,6 +329,17 @@ with tab_lit:
                 "Output mode",
                 ["Final output only", "Verbose — show all agent dialogue"],
                 index=0, key="mlr_view_mode",
+            )
+            run_mode = st.selectbox(
+                "Agent pipeline",
+                ["standard", "no_scout", "no_adversary", "writer_only"],
+                index=0, key="mlr_run_mode",
+                help=(
+                    "**standard** — full Scout→Writer↔Adversary pipeline\n\n"
+                    "**no_scout** — skip Scout briefing (Writer gets no field orientation)\n\n"
+                    "**no_adversary** — Scout runs, Writer drafts once, no critique loop\n\n"
+                    "**writer_only** — baseline: Writer drafts and polishes alone"
+                ),
             )
             papers_per_db = st.slider("Papers per database", 5, 20, 10, key="mlr_ppdb")
 
@@ -408,6 +424,7 @@ with tab_lit:
                     "question": research_question,
                     "paper_type": paper_type,
                     "max_rounds": max_rounds,
+                    "run_mode": run_mode,
                     "view_mode": "verbose" if "Verbose" in view_mode_raw else "final",
                     "papers_per_db": papers_per_db,
                 }
@@ -482,7 +499,14 @@ with tab_lit:
                 # ── Orchestrator runner ───────────────────────────────────────
                 def _run_agents(client, selected_papers):
                     verbose = (mlr["view_mode"] == "verbose")
-                    total_steps = 2 + mlr["max_rounds"] * 2   # scout + draft + (adversary+writer)*rounds
+                    cur_mode = mlr.get("run_mode", "standard")
+                    has_scout = cur_mode in ("standard", "no_adversary")
+                    has_adv   = cur_mode in ("standard", "no_scout")
+                    total_steps = (
+                        (1 if has_scout else 0)
+                        + 1  # writer draft
+                        + (mlr["max_rounds"] * 2 if has_adv else 1)
+                    )
                     step_ctr = [0]
 
                     status_ph = st.empty()
@@ -508,11 +532,15 @@ with tab_lit:
                             )
                             return
 
-                        if not verbose:
+                        if ev.phase == PHASE_TOKENS:
+                            # Always show token usage as a quiet caption
+                            if verbose:
+                                with ev_container:
+                                    st.caption(f"Tokens — {ev.content}")
                             return
 
-                        pill = (f'<span class="pill pill-{ev.agent}">{ev.agent}</span>'
-                                f'Round {ev.round}')
+                        if not verbose:
+                            return
 
                         if ev.phase == PHASE_BRIEFING:
                             with ev_container:
@@ -530,7 +558,6 @@ with tab_lit:
                                     st.markdown(ev.content)
 
                         elif ev.phase == PHASE_FINAL:
-                            badge = _score_html(ev.score) if ev.score else ""
                             with ev_container:
                                 with st.expander(
                                     f"Writer — Final Version  |  {ev.score}/10" if ev.score else "Writer — Final Version",
@@ -552,7 +579,7 @@ with tab_lit:
                                 st.caption(f"{ev.agent.title()} searched: {ev.content}")
 
                     try:
-                        final_output, all_events, final_papers = run_multi_agent_review(
+                        final_output, all_events, final_papers, token_summary = run_multi_agent_review(
                             client=client,
                             research_question=mlr["question"],
                             paper_type=mlr["paper_type"],
@@ -561,6 +588,7 @@ with tab_lit:
                             n_deduped=mlr["n_deduped"],
                             max_rounds=mlr["max_rounds"],
                             on_event=on_event,
+                            run_mode=cur_mode,
                         )
                     except anthropic.AuthenticationError:
                         status_ph.empty()
@@ -591,6 +619,12 @@ with tab_lit:
                         None,
                     )
 
+                    eval_score = evaluate_output(
+                        final_text=final_output,
+                        papers=final_papers,
+                        adversary_score=final_score or 0,
+                    )
+
                     mlr.update({
                         "step": "done",
                         "selected_papers": selected_papers,
@@ -603,6 +637,12 @@ with tab_lit:
                         ],
                         "verified": verified,
                         "final_score": final_score,
+                        "token_summary": [
+                            {"label": t.label, "agent": t.agent,
+                             "input_tokens": t.input_tokens, "output_tokens": t.output_tokens}
+                            for t in token_summary
+                        ],
+                        "eval_score": eval_score.as_dict(),
                     })
                     st.rerun()
 
@@ -638,13 +678,56 @@ with tab_lit:
 
         # Header row
         score_html = _score_html(mlr["final_score"]) if mlr["final_score"] else ""
+        mode_label = mlr.get("run_mode", "standard")
         summary_md = (
-            f"{len(mlr['final_papers'])} papers synthesised"
+            f"{len(mlr['final_papers'])} papers synthesised  ·  Mode: **{mode_label}**"
             + (f"   ·   Final verdict: " if mlr["final_score"] else "")
         )
         st.success(summary_md)
         if score_html:
             st.markdown(score_html, unsafe_allow_html=True)
+
+        # ── EvalScore panel ──────────────────────────────────────────────────
+        es = mlr.get("eval_score")
+        if es:
+            with st.expander("Automatic Quality Scores (EvalScore)", expanded=True):
+                ec1, ec2, ec3, ec4, ec5 = st.columns(5)
+                ec1.metric("Citation Coverage", f"{es['citation_coverage']*100:.0f}%",
+                           help="% of pool papers cited inline in the final text")
+                ec2.metric("Synthesis Depth", f"{es['synthesis_depth']}/10",
+                           help="Thematic synthesis vs. one-by-one paper summaries")
+                ec3.metric("Gap Specificity", f"{es['gap_specificity']}/10",
+                           help="Mechanism-level gap language vs. vague 'more research needed'")
+                ec4.metric("Adversary Score", f"{es['adversary_score']}/10",
+                           help="Final adversary verdict (0 if no adversary used)")
+                ec5.metric("Overall", f"{es['overall']:.1f}/100",
+                           help="Weighted composite: coverage 25%, synthesis 35%, gaps 25%, adversary 15%")
+
+        # ── Token usage breakdown ────────────────────────────────────────────
+        tokens = mlr.get("token_summary", [])
+        if tokens:
+            total_in  = sum(t["input_tokens"]  for t in tokens)
+            total_out = sum(t["output_tokens"] for t in tokens)
+            with st.expander(
+                f"Token Usage  ({(total_in+total_out)/1000:.1f}k total)", expanded=False
+            ):
+                rows = [{
+                    "Phase": t["label"],
+                    "Agent": t["agent"].title(),
+                    "Input": f"{t['input_tokens']:,}",
+                    "Output": f"{t['output_tokens']:,}",
+                    "Total": f"{t['input_tokens']+t['output_tokens']:,}",
+                } for t in tokens]
+                rows.append({
+                    "Phase": "**TOTAL**", "Agent": "",
+                    "Input": f"{total_in:,}", "Output": f"{total_out:,}",
+                    "Total": f"{total_in+total_out:,}",
+                })
+                st.dataframe(_pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                st.caption(
+                    f"Estimated cost (Claude Sonnet 4.6): "
+                    f"~${(total_in*3 + total_out*15) / 1_000_000:.4f} USD"
+                )
 
         # Download / reset
         dl_col, clr_col = st.columns([4, 1])
