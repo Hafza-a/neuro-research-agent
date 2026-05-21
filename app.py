@@ -159,6 +159,39 @@ def _tool_log_cb(log_list: list, ph):
     return _cb
 
 
+def _generate_research_brief(client, research_question: str, papers: list) -> str:
+    """Quick single-call brief (no tools) — tells the user what the papers collectively cover."""
+    if not papers:
+        return ""
+    titles_text = "\n".join(
+        f"[{i+1}] {p.get('title','?')} ({p.get('year','n.d.')}) — {p.get('source','')}"
+        for i, p in enumerate(papers[:30])
+    )
+    abstracts_text = "\n\n".join(
+        f"[{i+1}] {(p.get('abstract') or '')[:250]}"
+        for i, p in enumerate(papers[:15])
+        if p.get("abstract")
+    )
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=500,
+        messages=[{
+            "role": "user",
+            "content": (
+                f'Research question: "{research_question}"\n\n'
+                f"Papers retrieved ({len(papers)}):\n{titles_text}\n\n"
+                f"Abstracts (first 15):\n{abstracts_text}\n\n"
+                "Write a concise **Research Brief** (150–180 words) structured as:\n"
+                "- **Core themes covered** (2–3 bullet points, specific to these papers)\n"
+                "- **Coverage of the question** (1 sentence: does this set adequately address it?)\n"
+                "- **Likely gaps the Scout will fill** (1 sentence: what's probably missing)\n\n"
+                "Be specific to the actual papers above — no generic language."
+            ),
+        }],
+    )
+    return "".join(b.text for b in response.content if b.type == "text")
+
+
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown('<div class="sb-label">NeuroResearch Agent</div>', unsafe_allow_html=True)
@@ -241,13 +274,13 @@ with tab_lit:
         "paper_type": "Systematic Literature Review",
         "max_rounds": 1,
         "run_mode": "standard",
-        "view_mode": "final",
         "papers_per_db": 10,
         "all_papers": [],
         "papers": [],
         "n_raw": 0,
         "n_deduped": 0,
         "plan": {},
+        "research_brief": "",
         "selected_papers": [],
         "final_output": "",
         "final_papers": [],
@@ -325,11 +358,6 @@ with tab_lit:
                     "1 round = ~5–7 API calls; 3 rounds = ~9 API calls."
                 ),
             )
-            view_mode_raw = st.radio(
-                "Output mode",
-                ["Final output only", "Verbose — show all agent dialogue"],
-                index=0, key="mlr_view_mode",
-            )
             run_mode = st.selectbox(
                 "Agent pipeline",
                 ["standard", "no_scout", "no_adversary", "writer_only"],
@@ -344,21 +372,15 @@ with tab_lit:
             papers_per_db = st.slider("Papers per database", 5, 20, 10, key="mlr_ppdb")
 
         with inp_col:
-            examples = [
-                "Synaptic plasticity mechanisms in hippocampal memory consolidation",
-                "Role of the gut-brain axis in anxiety disorders",
-                "Neuroinflammation and major depressive disorder",
-                "Optogenetic dissection of basal ganglia circuits",
-                "Adult neurogenesis in the human hippocampus",
-                "Glial cells in Alzheimer's disease pathology",
-                "Dopamine signalling in reward learning",
-            ]
-            ex = st.selectbox("Example topics", [""] + examples, key="mlr_example")
             research_question = st.text_area(
                 "Research question or topic",
-                value=ex if ex else "",
-                placeholder="e.g. What is the role of neuroinflammation in major depressive disorder?",
-                height=110, key="mlr_rq",
+                placeholder=(
+                    "Be specific — the more precise your question, the better the review.\n\n"
+                    "e.g. What is the role of Dubosiella in neurodegenerative diseases?\n"
+                    "e.g. Hippocampal neurogenesis and spatial memory consolidation\n"
+                    "e.g. Neural correlates of working memory in prefrontal cortex"
+                ),
+                height=130, key="mlr_rq",
             )
 
             st.markdown(
@@ -414,6 +436,14 @@ with tab_lit:
                     st.stop()
 
                 prog_ph.empty()
+                # Generate the research brief immediately after search
+                brief = ""
+                try:
+                    with st.spinner("Generating research brief…"):
+                        brief = _generate_research_brief(client, research_question, papers)
+                except Exception:
+                    pass  # Brief is optional — don't block on failure
+
                 st.session_state["mlr"] = dict(_LR_DEFAULT) | {
                     "step": "searched",
                     "plan": plan,
@@ -425,13 +455,13 @@ with tab_lit:
                     "paper_type": paper_type,
                     "max_rounds": max_rounds,
                     "run_mode": run_mode,
-                    "view_mode": "verbose" if "Verbose" in view_mode_raw else "final",
                     "papers_per_db": papers_per_db,
+                    "research_brief": brief,
                 }
                 st.rerun()
 
     # ════════════════════════════════════════════════════════════════════════
-    # STEP 2 — Paper selection
+    # STEP 2 — Paper selection + Research Brief
     # ════════════════════════════════════════════════════════════════════════
     if mlr["step"] in ("searched", "done"):
         with st.expander(
@@ -439,6 +469,33 @@ with tab_lit:
             f"({mlr['n_deduped']} unique · {mlr['n_raw']} retrieved)",
             expanded=(mlr["step"] == "searched"),
         ):
+            # ── Research Brief ────────────────────────────────────────────
+            if mlr.get("research_brief"):
+                st.markdown(
+                    f'<div class="info-card">'
+                    f'<b>Research Brief</b><br><br>'
+                    f'{mlr["research_brief"]}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                brief_col, _ = st.columns([1, 3])
+                with brief_col:
+                    if st.button("Refresh Brief", key="mlr_refresh_brief", use_container_width=True):
+                        client_b = get_client()
+                        if client_b:
+                            with st.spinner("Re-generating brief…"):
+                                try:
+                                    mlr["research_brief"] = _generate_research_brief(
+                                        client_b, mlr["question"], mlr["papers"]
+                                    )
+                                except Exception:
+                                    pass
+                            st.rerun()
+            elif mlr["step"] == "searched":
+                st.info("Research brief will appear here after searching.")
+
+            st.divider()
+
             if mlr["papers"]:
                 df_data = []
                 for i, p in enumerate(mlr["papers"]):
@@ -455,9 +512,8 @@ with tab_lit:
                 df = pd.DataFrame(df_data)
 
                 st.caption(
-                    "Toggle the Include column to exclude papers. "
-                    "All are included by default. "
-                    "The Scout will also search for additional papers you may have missed."
+                    "Toggle **Include** to remove papers. "
+                    "The Scout will also search for additional foundational papers you may have missed."
                 )
                 edited = st.data_editor(
                     df,
@@ -477,18 +533,18 @@ with tab_lit:
 
                 selected_idx = edited[edited["Include"] == True]["#"].tolist()
                 n_sel = len(selected_idx)
-                st.caption(f"{n_sel} papers selected.")
+                st.caption(f"{n_sel} of {len(df_data)} papers selected.")
 
-                b1, b2, b3 = st.columns([2, 2, 1])
+                b1, b2, b3 = st.columns([3, 2, 1])
                 with b1:
                     run_btn = st.button(
-                        f"Run Agent Review  ({n_sel} papers)",
+                        f"Generate Literature Review  →  ({n_sel} papers)",
                         type="primary", use_container_width=True,
                         disabled=(n_sel == 0), key="mlr_run",
                     )
                 with b2:
                     auto_btn = st.button(
-                        "Auto-select best papers, then run",
+                        "Auto-select best papers",
                         use_container_width=True, key="mlr_auto",
                     )
                 with b3:
@@ -498,7 +554,7 @@ with tab_lit:
 
                 # ── Orchestrator runner ───────────────────────────────────────
                 def _run_agents(client, selected_papers):
-                    verbose = (mlr["view_mode"] == "verbose")
+                    verbose = True  # always capture transcript; display toggle is in Step 3
                     cur_mode = mlr.get("run_mode", "standard")
                     has_scout = cur_mode in ("standard", "no_adversary")
                     has_adv   = cur_mode in ("standard", "no_scout")
@@ -723,7 +779,7 @@ with tab_lit:
                     "Input": f"{total_in:,}", "Output": f"{total_out:,}",
                     "Total": f"{total_in+total_out:,}",
                 })
-                st.dataframe(_pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
                 st.caption(
                     f"Estimated cost (Claude Sonnet 4.6): "
                     f"~${(total_in*3 + total_out*15) / 1_000_000:.4f} USD"
@@ -747,14 +803,14 @@ with tab_lit:
                 st.session_state["mlr"] = dict(_LR_DEFAULT)
                 st.rerun()
 
-        # Agent transcript
+        # Agent transcript (always captured; collapsed by default)
         content_events = [e for e in mlr["events"]
                           if e["phase"] in (PHASE_BRIEFING, PHASE_DRAFT, PHASE_REVISION,
                                             PHASE_FINAL, PHASE_FEEDBACK)]
         if content_events:
             with st.expander(
-                f"Agent Collaboration Transcript ({len(content_events)} exchanges)",
-                expanded=(mlr["view_mode"] == "verbose"),
+                f"Show agent work ({len(content_events)} exchanges — Scout briefing, drafts, critiques)",
+                expanded=False,
             ):
                 for e in mlr["events"]:
                     agent = e["agent"]
@@ -843,10 +899,18 @@ with tab_lit:
                     f"{n_bad} unverified — check manually before citing"
                 )
 
-        # Final review body
+        # Final review body — presented as a clean academic document
         st.markdown("---")
-        st.markdown("### Final Literature Review")
+        st.markdown(
+            f'<div style="max-width:860px; margin:0 auto;">'
+            f'<div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; '
+            f'letter-spacing:0.12em; color:{_C["muted"]}; margin-bottom:0.5rem;">'
+            f'Generated Literature Review · {mlr.get("paper_type","Review")} · '
+            f'{len(mlr["final_papers"])} papers</div>',
+            unsafe_allow_html=True,
+        )
         st.markdown(mlr["final_output"])
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
